@@ -302,6 +302,10 @@
               <label>邮箱<input id="authEmail" type="email" maxlength="254" autocomplete="email" required placeholder="you@example.com"></label>
               <label>密码<input id="authPassword" type="password" minlength="8" maxlength="72" autocomplete="current-password" required placeholder="至少 8 位"></label>
               <label id="authConfirmLabel" class="hidden">确认密码<input id="authPasswordConfirm" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="再次输入密码"></label>
+              <div class="auth-captcha hidden" id="authCaptchaPanel">
+                <div id="authTurnstile"></div>
+                <small id="authCaptchaStatus">正在载入安全验证……</small>
+              </div>
               <p class="form-error" id="authError" role="alert"></p>
               <button class="btn primary wide" id="emailAuthSubmit" type="submit">登录</button>
             </form>

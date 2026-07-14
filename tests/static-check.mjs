@@ -17,10 +17,13 @@ if (existsSync(new URL("../.env", import.meta.url))) {
 assert(!/service_role/i.test(client + cloud + app), "Frontend source must never contain service_role");
 assert.match(workflow, /VITE_SUPABASE_URL: \$\{\{ secrets\.VITE_SUPABASE_URL \}\}/);
 assert.match(workflow, /VITE_SUPABASE_ANON_KEY: \$\{\{ secrets\.VITE_SUPABASE_ANON_KEY \}\}/);
+assert.match(workflow, /VITE_TURNSTILE_SITE_KEY:[^\n]+vars\.VITE_TURNSTILE_SITE_KEY/);
+assert.match(client, /VITE_TURNSTILE_SITE_KEY/); assert.match(cloud, /captchaToken/); assert.match(app, /turnstile\.render/);
+assert(!/TURNSTILE_SECRET/i.test(client + cloud + app + html), "Turnstile Secret must never enter frontend source");
 
 const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(v => v[1]);
 assert.equal(new Set(ids).size, ids.length, "Duplicate HTML id detected");
-const dynamic = new Set(["articleCommentContent","articleCommentForm","articleCommentList","deleteSectionCheck","deleteTaskCheck","editSectionColor","editSectionName","levelColor","levelName","levelNote","newPageLang","newPageName","newSectionColor","newSectionName","restoreVersionBtn","taskDesc","taskDue","taskTitle"]);
+const dynamic = new Set(["articleCommentContent","articleCommentForm","articleCommentList","deleteSectionCheck","deleteTaskCheck","editSectionColor","editSectionName","levelColor","levelName","levelNote","newPageLang","newPageName","newSectionColor","newSectionName","restoreVersionBtn","taskDesc","taskDue","taskTitle","turnstileScript"]);
 const refs = [...app.matchAll(/\$\("#([A-Za-z][A-Za-z0-9_-]*)"/g)].map(v => v[1]);
 const missing = [...new Set(refs.filter(id => !ids.includes(id) && !dynamic.has(id)))];
 assert.deepEqual(missing, [], `Missing static DOM ids: ${missing.join(", ")}`);

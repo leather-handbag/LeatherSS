@@ -56,9 +56,10 @@ npm test
 2. Redirect URLs 同时加入线上地址和本地地址，例如 `http://localhost:5173/**`。
 3. 邮箱登录建议开启 Confirm email，并配置正式 SMTP。
 4. GitHub 登录需要在 GitHub 创建 OAuth App，再把 Client ID/Secret 填入 Supabase Authentication → Providers → GitHub。
-5. 建议在 Supabase 开启 CAPTCHA、泄漏密码检查和合理的 Auth/API Rate Limits。
+5. Turnstile Site Key 使用前端变量 `VITE_TURNSTILE_SITE_KEY`；Secret Key 只填 Supabase Authentication → Bot and Abuse Protection，绝不能写入仓库或任何 `VITE_` 变量。
+6. 建议在 Supabase 开启合理的 Auth/API Rate Limits；泄漏密码检查需要支持该功能的 Supabase 套餐。
 
-当前项目已配置线上、本地回调地址和最短 8 位密码。GitHub Provider、正式 SMTP 与 CAPTCHA 仍需要你自己的第三方凭据，具体地址见 [SUPABASE_SETUP_REPORT.md](SUPABASE_SETUP_REPORT.md)。
+当前项目已配置线上/本地回调地址、最短 8 位密码、正式 SMTP、GitHub Provider 和 Turnstile 前端组件，站长账号也已绑定。Supabase 远端仍需填入 Turnstile Secret 并启用 CAPTCHA；Cloudflare 域名或 Pages 验证不会自动完成这一步，具体状态见 [SUPABASE_SETUP_REPORT.md](SUPABASE_SETUP_REPORT.md)。
 
 ## 绑定站长
 

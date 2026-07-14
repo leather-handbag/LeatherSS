@@ -1,4 +1,6 @@
-import { supabase, supabaseConfigured, supabaseErrorText } from "./supabase.js";
+import { supabase, supabaseConfigured, supabaseErrorText, turnstileConfigured, turnstileSiteKey } from "./supabase.js";
+
+export { turnstileConfigured, turnstileSiteKey };
 
 export const cloud = { configured: supabaseConfigured, user: null, profile: null, stats: null, avatarRequest: null, session: null, authReady: false };
 
@@ -31,17 +33,17 @@ export async function initCloud(onChange) {
   });
 }
 
-export async function emailLogin(email, password) {
-  const { error } = await supabase.auth.signInWithPassword({ email, password }); fail(error);
+export async function emailLogin(email, password, captchaToken) {
+  const { error } = await supabase.auth.signInWithPassword({ email, password, options: { captchaToken } }); fail(error);
 }
-export async function emailSignup(email, password) {
-  const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectUrl() } }); fail(error); return data;
+export async function emailSignup(email, password, captchaToken) {
+  const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectUrl(), captchaToken } }); fail(error); return data;
 }
 export async function githubLogin() {
   const { error } = await supabase.auth.signInWithOAuth({ provider: "github", options: { redirectTo: redirectUrl(), scopes: "read:user user:email" } }); fail(error);
 }
-export async function sendPasswordReset(email) {
-  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirectUrl()}#account` }); fail(error);
+export async function sendPasswordReset(email, captchaToken) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirectUrl()}#account`, captchaToken }); fail(error);
 }
 export async function updatePassword(password) { const { error } = await supabase.auth.updateUser({ password }); fail(error); }
 export async function signOut() { const { error } = await supabase.auth.signOut(); fail(error); }

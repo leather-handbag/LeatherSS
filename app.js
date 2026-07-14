@@ -951,9 +951,61 @@ $("#stationCommentForm").onsubmit = async e => {
 
 // Supabase account, profile, check-in, ranking and moderation UI
 let authMode = "login", avatarFile = null, leaderboardTimer = 0, adminUsersCache = [];
+let authCaptchaToken = "", authCaptchaWidget = null;
 const hasWriteAccess = () => !!(api.cloud.user && api.cloud.profile && !api.cloud.profile.banned_at);
 const isStaff = () => ["admin", "owner"].includes(api.cloud.profile?.role);
 const chinaDateText = value => new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(value ? new Date(`${value}T00:00:00+08:00`) : new Date());
+
+function setAuthCaptchaStatus(message, state = "") {
+  const status = $("#authCaptchaStatus");
+  if (!status) return;
+  status.textContent = message; status.className = state;
+}
+function renderAuthCaptcha() {
+  if (!api.turnstileConfigured || authCaptchaWidget !== null || !window.turnstile) return;
+  $("#authCaptchaPanel").classList.remove("hidden");
+  try {
+    authCaptchaWidget = window.turnstile.render("#authTurnstile", {
+      sitekey: api.turnstileSiteKey,
+      action: "account_auth",
+      language: "zh-CN",
+      theme: "light",
+      size: "flexible",
+      appearance: "always",
+      retry: "auto",
+      "refresh-expired": "auto",
+      callback: token => { authCaptchaToken = token; setAuthCaptchaStatus("安全验证已通过", "ready"); },
+      "expired-callback": () => { authCaptchaToken = ""; setAuthCaptchaStatus("验证已过期，请重新完成", "error"); },
+      "timeout-callback": () => { authCaptchaToken = ""; setAuthCaptchaStatus("验证超时，请重试", "error"); },
+      "error-callback": () => { authCaptchaToken = ""; setAuthCaptchaStatus("安全验证加载失败，请刷新页面", "error"); }
+    });
+  } catch {
+    setAuthCaptchaStatus("安全验证初始化失败，请刷新页面", "error");
+  }
+}
+function loadAuthCaptcha() {
+  if (!api.turnstileConfigured) return;
+  $("#authCaptchaPanel").classList.remove("hidden");
+  if (window.turnstile) { renderAuthCaptcha(); return; }
+  if ($("#turnstileScript")) return;
+  const script = document.createElement("script");
+  script.id = "turnstileScript"; script.async = true; script.defer = true;
+  script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+  script.onload = renderAuthCaptcha;
+  script.onerror = () => setAuthCaptchaStatus("无法连接 Cloudflare 安全验证，请检查网络", "error");
+  document.head.append(script);
+}
+function requireAuthCaptcha() {
+  if (!api.turnstileConfigured) return undefined;
+  if (!authCaptchaToken) throw new Error("请先完成人机验证");
+  return authCaptchaToken;
+}
+function resetAuthCaptcha() {
+  authCaptchaToken = "";
+  if (window.turnstile && authCaptchaWidget !== null) window.turnstile.reset(authCaptchaWidget);
+  setAuthCaptchaStatus("请完成人机验证", "");
+}
+loadAuthCaptcha();
 
 function avatarHtml(profile, cls = "") {
   const name = profile?.display_name || profile?.handle || "L";
@@ -1023,20 +1075,20 @@ function renderAccount() {
 $$('[data-auth-tab]').forEach(button => button.onclick = () => {
   authMode = button.dataset.authTab; $$('[data-auth-tab]').forEach(v => v.classList.toggle("active", v === button));
   $("#authConfirmLabel").classList.toggle("hidden", authMode !== "signup"); $("#authPasswordConfirm").required = authMode === "signup";
-  $("#emailAuthSubmit").textContent = authMode === "signup" ? "创建账号" : "登录"; $("#authError").textContent = "";
+  $("#emailAuthSubmit").textContent = authMode === "signup" ? "创建账号" : "登录"; $("#authError").textContent = ""; resetAuthCaptcha();
 });
 $("#emailAuthForm").onsubmit = async e => {
   e.preventDefault(); if (!api.cloud.configured) { $("#authError").textContent = "请先配置 Supabase 环境变量"; return; }
   const email = $("#authEmail").value.trim(), password = $("#authPassword").value; $("#authError").textContent = "";
   if (password.length < 8) { $("#authError").textContent = "密码至少 8 位"; return; }
   if (authMode === "signup" && password !== $("#authPasswordConfirm").value) { $("#authError").textContent = "两次密码不一致"; return; }
-  $("#emailAuthSubmit").disabled = true;
-  try { if (authMode === "signup") { const data = await api.emailSignup(email, password); toast(data.session ? "注册并登录成功" : "验证邮件已发送，请完成邮箱验证"); } else await api.emailLogin(email, password); }
+  let usedCaptcha = false; $("#emailAuthSubmit").disabled = true;
+  try { const captchaToken = requireAuthCaptcha(); usedCaptcha = !!captchaToken; if (authMode === "signup") { const data = await api.emailSignup(email, password, captchaToken); toast(data.session ? "注册并登录成功" : "验证邮件已发送，请完成邮箱验证"); } else await api.emailLogin(email, password, captchaToken); }
   catch (error) { $("#authError").textContent = error.message; }
-  finally { $("#emailAuthSubmit").disabled = false; }
+  finally { if (usedCaptcha) resetAuthCaptcha(); $("#emailAuthSubmit").disabled = false; }
 };
 $("#githubAuthBtn").onclick = async () => { if (!api.cloud.configured) { toast("请先配置 Supabase", "error"); return; } try { await api.githubLogin(); } catch (error) { toast(error.message, "error"); } };
-$("#resetPasswordBtn").onclick = async () => { const email = $("#authEmail").value.trim(); if (!email) { $("#authError").textContent = "请先填写邮箱"; return; } try { await api.sendPasswordReset(email); toast("密码重置邮件已发送"); } catch (error) { $("#authError").textContent = error.message; } };
+$("#resetPasswordBtn").onclick = async () => { const email = $("#authEmail").value.trim(); if (!email) { $("#authError").textContent = "请先填写邮箱"; return; } let usedCaptcha = false; try { const captchaToken = requireAuthCaptcha(); usedCaptcha = !!captchaToken; await api.sendPasswordReset(email, captchaToken); toast("密码重置邮件已发送"); } catch (error) { $("#authError").textContent = error.message; } finally { if (usedCaptcha) resetAuthCaptcha(); } };
 $("#signOutBtn").onclick = async () => { if (!confirmBlogDiscard() || !confirmDiscard()) return; try { await api.signOut(); location.hash = "home"; } catch (error) { toast(error.message, "error"); } };
 $("#profileAvatarFile").onchange = e => { avatarFile = e.target.files[0] || null; if (!avatarFile) return; if (avatarFile.size > 2 * 1024 * 1024) { toast("头像不能超过 2 MB", "error"); avatarFile = null; e.target.value = ""; return; } const url = URL.createObjectURL(avatarFile); $("#profileAvatarPreview").innerHTML = `<img src="${url}" alt="头像预览">`; $("#avatarRequestStatus").textContent = "保存资料后将提交管理员审核"; $("#avatarRequestStatus").className = "avatar-status-pending"; };
 $("#profileForm").onsubmit = async e => {
