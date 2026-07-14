@@ -23,6 +23,7 @@
         <a href="#roadmap" data-page="roadmap"><span class="nav-icon">⌁</span><span>任务导图</span></a>
         <a href="#blogs" data-page="blogs"><span class="nav-icon">✎</span><span>我的博客</span></a>
         <a href="#square" data-page="square"><span class="nav-icon">▦</span><span>文章广场</span></a>
+        <a href="#discussion" data-page="discussion"><span class="nav-icon">☵</span><span>讨论区</span></a>
         <a href="#checkin" data-page="checkin"><span class="nav-icon">◉</span><span>每日签到</span></a>
         <a href="#leaderboard" data-page="leaderboard"><span class="nav-icon">♜</span><span>排行榜</span></a>
         <a href="#account" data-page="account"><span class="nav-icon">♙</span><span>个人中心</span></a>
@@ -40,6 +41,10 @@
         <div class="breadcrumb"><span>Leather</span><i>/</i><b id="pageTitle">首页</b></div>
         <div class="top-actions">
           <span class="save-state" id="saveState"><i></i>正在连接</span>
+          <div class="notification-wrap hidden" id="notificationWrap">
+            <button class="notification-bell" id="notificationBell" type="button" aria-label="查看提及通知">♢<span class="hidden" id="notificationCount">0</span></button>
+            <div class="notification-panel hidden" id="notificationPanel"><header><b>提及我的讨论</b><button class="text-btn" id="markNotificationsRead" type="button">全部已读</button></header><div id="notificationList"></div></div>
+          </div>
           <a class="account-chip" id="topAccountBtn" href="#account"><span class="account-avatar" id="topAccountAvatar">?</span><span id="topAccountName">登录</span></a>
         </div>
       </header>
@@ -233,41 +238,40 @@
           <button class="btn primary" id="newBlogBtn">＋ 新建博客</button>
         </div>
         <div class="local-public-note"><span>i</span><p><b>云端账号版：</b>私有文章仅作者和管理员可读；公开文章会进入所有访客可见的文章广场。发布和修改都由数据库 RLS 校验作者身份。</p></div>
-        <div class="blog-manager">
-          <aside class="blog-list-pane">
-            <div class="blog-list-tools">
-              <div class="search-box">⌕<input id="myBlogSearch" placeholder="搜索我的文章"></div>
-              <select id="myBlogVisibility" aria-label="按可见性筛选"><option value="">全部文章</option><option value="public">公开</option><option value="private">私有</option></select>
-            </div>
-            <div id="myBlogList" class="my-blog-list"></div>
-          </aside>
-          <section class="blog-editor-panel">
-            <div id="blogEditorEmpty" class="empty-state blog-empty"><div>✎</div><h3>选择文章或新建博客</h3><p>文章内容会自动保存在此浏览器中。</p></div>
-            <form id="blogEditor" class="blog-editor hidden">
-              <div class="blog-editor-top">
-                <div><span class="eyebrow" id="blogEditorMode">NEW ARTICLE</span><input id="blogTitle" class="blog-title-input" maxlength="100" placeholder="文章标题" required></div>
-                <button class="icon-btn danger" id="deleteBlogBtn" type="button" title="删除文章">×</button>
-              </div>
-              <div class="blog-meta-fields">
-                <label>署名<input id="blogAuthor" maxlength="30" placeholder="使用账号名称" readonly></label>
-                <label>可见性<select id="blogVisibility"><option value="private">私有 · 仅自己可见</option><option value="public">公开 · 显示在文章广场</option></select></label>
-                <label class="wide-field">标签<input id="blogTags" maxlength="100" placeholder="算法, 图论, 题解（用逗号分隔）"></label>
-                <label class="wide-field">摘要<textarea id="blogSummary" maxlength="240" placeholder="用一两句话介绍这篇文章"></textarea></label>
-              </div>
-              <div class="write-toolbar"><span>Markdown + LaTeX</span><small>支持标题、列表、引用、链接、代码块、表格与公式</small><button class="text-btn" id="toggleBlogPreviewBtn" type="button">打开预览</button></div>
-              <textarea id="blogContent" class="blog-content-editor" maxlength="60000" spellcheck="false" placeholder="# 标题&#10;&#10;在这里开始写作……&#10;&#10;行内公式：$O(n \log n)$&#10;&#10;独立公式：&#10;$$&#10;\sum_{i=1}^{n} i = \frac{n(n+1)}{2}&#10;$$"></textarea>
-              <div id="blogPreview" class="markdown-body blog-preview hidden"></div>
-              <p class="form-error" id="blogFormError" role="alert"></p>
-              <div class="blog-editor-actions"><span id="blogSaveHint">尚未保存</span><button class="btn ghost" id="viewBlogBtn" type="button">阅读模式</button><button class="btn primary" type="submit">保存文章</button></div>
-            </form>
-          </section>
+        <div class="blog-library-tools">
+          <div class="search-box">⌕<input id="myBlogSearch" placeholder="搜索标题、标签或摘要"></div>
+          <select id="myBlogVisibility" aria-label="按可见性筛选"><option value="">全部文章</option><option value="public">公开</option><option value="private">私有</option></select>
         </div>
+        <div id="myBlogList" class="my-blog-list blog-library-grid"></div>
+      </section>
+
+      <section class="page" id="page-blog-editor" data-title="博客编辑器">
+        <div class="blog-editor-page-head"><button class="text-btn" id="blogEditorBackBtn" type="button">← 返回我的文章</button><div><span class="eyebrow" id="blogEditorMode">NEW ARTICLE</span><span id="blogSaveHint">尚未保存</span></div></div>
+        <form id="blogEditor" class="blog-editor blog-editor-page">
+          <div class="blog-editor-top">
+            <input id="blogTitle" class="blog-title-input" maxlength="100" placeholder="文章标题" required>
+            <button class="icon-btn danger" id="deleteBlogBtn" type="button" title="删除文章">×</button>
+          </div>
+          <div class="blog-meta-fields">
+            <label>署名<input id="blogAuthor" maxlength="30" placeholder="使用账号名称" readonly></label>
+            <label>可见性<select id="blogVisibility"><option value="private">私有 · 仅自己可见</option><option value="public">公开 · 显示在文章广场</option></select></label>
+            <label class="wide-field">标签<input id="blogTags" maxlength="100" placeholder="算法, 图论, 题解（用逗号分隔）"></label>
+            <label class="wide-field">摘要<textarea id="blogSummary" maxlength="240" placeholder="用一两句话介绍这篇文章"></textarea></label>
+          </div>
+          <div class="write-toolbar"><span>Markdown + LaTeX · 实时同步预览</span><small>支持标题、列表、引用、链接、代码块、表格与公式</small></div>
+          <div class="blog-writing-split">
+            <section><header><b>编辑</b><span>Markdown</span></header><textarea id="blogContent" class="blog-content-editor" maxlength="60000" spellcheck="false" placeholder="# 标题&#10;&#10;在这里开始写作……&#10;&#10;行内公式：$O(n \log n)$&#10;&#10;独立公式：&#10;$$&#10;\sum_{i=1}^{n} i = \frac{n(n+1)}{2}&#10;$$"></textarea></section>
+            <section><header><b>预览</b><span>实时更新</span></header><div id="blogPreview" class="markdown-body blog-preview"></div></section>
+          </div>
+          <p class="form-error" id="blogFormError" role="alert"></p>
+          <div class="blog-editor-actions"><span id="blogAutosaveHint">自动保存：10 分钟</span><button class="btn ghost" id="viewBlogBtn" type="button">阅读模式</button><button class="btn primary" type="submit">保存文章</button></div>
+        </form>
       </section>
 
       <section class="page" id="page-square" data-title="文章广场">
         <div class="workspace-head square-head">
           <div><span class="eyebrow">PUBLIC ARTICLE SQUARE</span><h1>分享思路，也欢迎严谨的讨论。</h1><p>这里仅展示设为公开的博客。评论前会进行严格的前端敏感内容检查。</p></div>
-          <a class="btn primary" href="#blogs">写一篇文章</a>
+          <a class="btn primary" href="#blog-editor/new">写一篇文章</a>
         </div>
         <div class="square-toolbar">
           <div class="search-box">⌕<input id="squareSearch" placeholder="搜索标题、摘要、作者或标签"></div>
@@ -275,17 +279,23 @@
           <span id="squareCount">0 篇公开文章</span>
         </div>
         <div id="squareGrid" class="square-grid"></div>
-        <section class="station-comments">
-          <div class="station-comment-intro"><span class="eyebrow">STATION FEEDBACK</span><h2>给整个工作站留言</h2><p>发现 bug、功能异常或有改进建议，可以在这里反馈。请勿留下密码、密钥等隐私信息。</p></div>
-          <div class="station-comment-main">
+      </section>
+
+      <section class="page" id="page-discussion" data-title="讨论区">
+        <div class="workspace-head discussion-head"><div><span class="eyebrow">LEATHER DISCUSSIONS</span><h1>一起讨论，也认真回答。</h1><p>灌水区轻松交流，学术区讨论算法与竞赛，站务区反馈网站问题。输入 <code>@用户ID</code> 或点击回复即可通知对方。</p></div></div>
+        <div class="discussion-tabs" id="discussionTabs"><button class="active" data-kind="" type="button">全部</button><button data-kind="water" type="button">灌水区</button><button data-kind="academic" type="button">学术区</button><button data-kind="site" type="button">站务区</button></div>
+        <div class="discussion-layout">
+          <aside class="discussion-compose">
             <form id="stationCommentForm" class="comment-form">
-              <div class="comment-fields"><input id="stationCommentAuthor" maxlength="30" placeholder="登录后自动使用账号名称" readonly><select id="stationCommentType"><option value="bug">Bug 反馈</option><option value="suggestion">功能建议</option><option value="other">其他留言</option></select></div>
-              <textarea id="stationCommentContent" maxlength="1000" placeholder="请尽量说明复现步骤、浏览器环境或具体建议……" required></textarea>
-              <div><small>提交前会检查变体、谐音拆分与特殊符号绕过。</small><button class="btn primary small" type="submit">提交留言</button></div>
+              <label>分区<select id="stationCommentType"><option value="water">灌水区</option><option value="academic">学术区</option><option value="site">站务区</option></select></label>
+              <input id="stationCommentAuthor" maxlength="30" placeholder="登录后自动使用账号名称" readonly>
+              <div class="discussion-reply-target hidden" id="discussionReplyTarget"></div>
+              <textarea id="stationCommentContent" maxlength="1000" placeholder="发表讨论；使用 @用户ID 提及别人……" required></textarea>
+              <div><small>内容会经过前端提示和服务端严格审核。</small><button class="btn primary small" type="submit">发表讨论</button></div>
             </form>
-            <div id="stationCommentList" class="comment-list"></div>
-          </div>
-        </section>
+          </aside>
+          <div id="stationCommentList" class="discussion-list"></div>
+        </div>
       </section>
 
       <section class="page" id="page-article" data-title="阅读文章">
@@ -328,6 +338,7 @@
             </form>
             <div class="account-side-cards">
               <section class="settings-card profile-level-card"><h2>当前等级</h2><div id="accountLevelSummary"></div><a class="btn ghost small" id="myPublicProfileBtn" href="#profile">查看公开主页</a></section>
+              <form id="blogSettingsForm" class="settings-card"><h2>博客自动保存</h2><label>保存间隔<select id="blogAutosaveInterval"><option value="5">每 5 分钟</option><option value="10">每 10 分钟</option><option value="30">每 30 分钟</option></select></label><small>仅在文章有修改且标题、正文完整时自动保存。</small><button class="btn ghost small" type="submit">保存设置</button></form>
               <form id="passwordForm" class="settings-card"><h2>修改密码</h2><label>新密码<input id="newPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" required></label><label>确认新密码<input id="newPasswordConfirm" type="password" minlength="8" maxlength="72" autocomplete="new-password" required></label><p class="form-error" id="passwordError"></p><button class="btn dark" type="submit">更新密码</button></form>
             </div>
           </div>
@@ -335,10 +346,10 @@
       </section>
 
       <section class="page" id="page-checkin" data-title="每日签到">
-        <div class="workspace-head checkin-head"><div><span class="eyebrow">DAILY RNG CHECK-IN</span><h1>今天，会抽到怎样的数字？</h1><p>每天仅可签到一次。安全随机生成六位数字，并根据重复、回文、顺子等形态评级。</p></div><a class="btn ghost" href="#leaderboard">查看排行榜</a></div>
+        <div class="workspace-head checkin-head"><div><span class="eyebrow">DAILY LUCKY CHECK-IN</span><h1>今天，会抽到怎样的数字？</h1><p>每天仅可签到一次。服务端独立生成 3 个安全随机六位数，展示评级最高的一个。</p></div><a class="btn ghost" href="#leaderboard">查看排行榜</a></div>
         <div class="checkin-layout">
           <section class="rng-card"><div class="rng-date" id="checkinDate">今日签到</div><div class="rng-number" id="checkinNumber">------</div><div class="rarity-badge common" id="checkinRarity">等待抽取</div><p id="checkinMessage">点击按钮生成今天唯一的随机数字。</p><button class="btn primary wide" id="dailyCheckinBtn">生成数字并签到</button></section>
-          <section class="rarity-rules"><span class="eyebrow">RARITY RULES</span><h2>稀有度规则</h2><div class="rarity-rule-list"><article class="legendary"><b>传说</b><span>六位相同、完整正序或倒序</span></article><article class="epic"><b>史诗</b><span>回文、前三位重复、四位以上相同</span></article><article class="rare"><b>稀有</b><span>三位相同、三组对子、末尾 000</span></article><article class="uncommon"><b>少见</b><span>对子、三位顺子、末尾 00</span></article><article class="common"><b>普通</b><span>没有命中特殊数字形态</span></article></div><p>等级只展示随机数字的稀有程度，不额外增加积分，避免排行榜由运气决定。</p></section>
+          <section class="rarity-rules"><span class="eyebrow">RARITY RULES</span><h2>稀有度规则</h2><div class="rarity-rule-list"><article class="legendary"><b>传说</b><span>六位相同、完整正序或倒序</span></article><article class="epic"><b>史诗</b><span>回文、两组三位相同、四位以上相同</span></article><article class="rare"><b>稀有</b><span>刻子、三组对子</span></article><article class="uncommon"><b>少见</b><span>对子、三位顺子</span></article><article class="common"><b>普通</b><span>没有命中特殊数字形态</span></article></div><p>每天三次独立抽取并展示最高评级；稀有度不额外增加积分。</p></section>
         </div>
         <section class="checkin-history"><div class="comment-title"><div><span class="eyebrow">HISTORY</span><h2>我的签到记录</h2></div><span id="checkinHistoryCount">0 次</span></div><div id="checkinHistoryList" class="checkin-history-list"></div></section>
       </section>
@@ -360,7 +371,7 @@
         <div id="adminConsole" class="admin-console hidden">
           <section class="admin-card"><div class="admin-card-head"><div><h2>用户管理</h2><p>搜索正常账号、封禁以及站长专属的管理员授权。</p></div><div class="search-box">⌕<input id="adminUserSearch" placeholder="搜索名字或 ID"></div></div><div id="adminUserList" class="admin-list"></div></section>
           <section class="admin-card"><div class="admin-card-head"><div><h2>头像审核</h2><p>新头像通过审核后才会在公开资料中显示。</p></div><span class="review-count" id="avatarReviewCount">0 项</span></div><div id="avatarRequestList" class="admin-list"></div></section>
-          <section class="admin-card"><div class="admin-card-head"><div><h2>全部内容</h2><p>管理员可查看并删除普通用户的博客、评论、计划与模板。</p></div><select id="adminContentType"><option value="posts">博客</option><option value="post_comments">文章评论</option><option value="station_comments">工作站留言</option><option value="plans">计划</option><option value="templates">模板</option></select></div><div id="adminContentList" class="admin-list"></div></section>
+          <section class="admin-card"><div class="admin-card-head"><div><h2>全部内容</h2><p>管理员可查看并删除普通用户的博客、评论、计划与模板。</p></div><select id="adminContentType"><option value="posts">博客</option><option value="post_comments">文章评论</option><option value="station_comments">讨论区</option><option value="plans">计划</option><option value="templates">模板</option></select></div><div id="adminContentList" class="admin-list"></div></section>
           <section class="admin-card wide hidden" id="ownerBanCard"><div class="admin-card-head"><div><h2>封禁列表</h2><p>仅站长可见，保存封禁时间、原因并提供解封操作。</p></div><span class="review-count" id="ownerBanCount">0 人</span></div><div id="ownerBanList" class="admin-list"></div></section>
           <section class="admin-card wide"><div class="admin-card-head"><div><h2>审核记录</h2><p>显示自动删除封禁和人工管理操作。</p></div><button class="btn ghost small" id="refreshAdminBtn">刷新</button></div><div id="moderationEventList" class="admin-list"></div></section>
         </div>

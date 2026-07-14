@@ -2,7 +2,7 @@ import { supabase, supabaseConfigured, supabaseErrorText, turnstileConfigured, t
 
 export { turnstileConfigured, turnstileSiteKey };
 
-export const cloud = { configured: supabaseConfigured, user: null, profile: null, stats: null, avatarRequest: null, session: null, authReady: false };
+export const cloud = { configured: supabaseConfigured, user: null, profile: null, stats: null, avatarRequest: null, session: null, authReady: false, blogAutosaveMinutes: 10 };
 
 function fail(error) { if (error) throw new Error(supabaseErrorText(error)); }
 function redirectUrl() { return `${location.origin}${location.pathname}`; }
@@ -88,7 +88,11 @@ export async function fetchBlogData() {
     const author = profiles.get(item.user_id);
     return { id: item.id, userId: item.user_id, title: item.title, author: profileName(author), authorHandle: author?.handle || "", authorRole: author?.role || "user", authorColor: author?.name_color || "blue", summary: item.summary, content: item.content, tags: item.tags || [], visibility: item.visibility, created: Date.parse(item.created_at), updated: Date.parse(item.updated_at), comments: (grouped.get(item.id) || []).map(comment => { const owner = profiles.get(comment.user_id); return { id: comment.id, userId: comment.user_id, author: profileName(owner), authorHandle: owner?.handle || "", authorRole: owner?.role || "user", authorColor: owner?.name_color || "blue", content: comment.content, time: Date.parse(comment.created_at) }; }) };
   });
-  const stationComments = (station || []).map(comment => { const owner = profiles.get(comment.user_id); return { id: comment.id, userId: comment.user_id, author: profileName(owner), authorHandle: owner?.handle || "", authorRole: owner?.role || "user", authorColor: owner?.name_color || "blue", type: comment.kind, content: comment.content, time: Date.parse(comment.created_at) }; });
+  const stationMap = new Map((station || []).map(comment => [comment.id, comment]));
+  const stationComments = (station || []).map(comment => {
+    const owner = profiles.get(comment.user_id), parent = stationMap.get(comment.reply_to), parentOwner = parent ? profiles.get(parent.user_id) : null;
+    return { id: comment.id, userId: comment.user_id, author: profileName(owner), authorHandle: owner?.handle || "", authorRole: owner?.role || "user", authorColor: owner?.name_color || "blue", type: comment.kind, content: comment.content, time: Date.parse(comment.created_at), replyTo: comment.reply_to || "", replyAuthor: profileName(parentOwner), replyHandle: parentOwner?.handle || "" };
+  });
   return { blogs, station: stationComments };
 }
 
@@ -105,9 +109,14 @@ export async function deletePost(id) { const { error } = await supabase.from("po
 export async function addPostComment(postId, content) { const { data, error } = await supabase.from("post_comments").insert({ post_id: postId, user_id: cloud.user.id, content }).select().maybeSingle(); fail(error); if (!data) throw new Error("评论被服务端审核拦截"); return data; }
 export async function updatePostComment(id, content) { const { data, error } = await supabase.from("post_comments").update({ content, updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", cloud.user.id).select().maybeSingle(); fail(error); if (!data) throw new Error("评论未更新，可能被服务端审核删除"); return data; }
 export async function deletePostComment(id) { const { error } = await supabase.from("post_comments").delete().eq("id", id); fail(error); }
-export async function addStationComment(kind, content) { const { data, error } = await supabase.from("station_comments").insert({ user_id: cloud.user.id, kind, content }).select().maybeSingle(); fail(error); if (!data) throw new Error("留言被服务端审核拦截"); return data; }
-export async function updateStationComment(id, content) { const { data, error } = await supabase.from("station_comments").update({ content, updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", cloud.user.id).select().maybeSingle(); fail(error); if (!data) throw new Error("留言未更新，可能被服务端审核删除"); return data; }
+export async function addStationComment(kind, content, replyTo = null) { const { data, error } = await supabase.from("station_comments").insert({ user_id: cloud.user.id, kind, content, reply_to: replyTo || null }).select().maybeSingle(); fail(error); if (!data) throw new Error("讨论被服务端审核拦截"); return data; }
+export async function updateStationComment(id, content) { const { data, error } = await supabase.from("station_comments").update({ content, updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", cloud.user.id).select().maybeSingle(); fail(error); if (!data) throw new Error("讨论未更新，可能被服务端审核删除"); return data; }
 export async function deleteStationComment(id) { const { error } = await supabase.from("station_comments").delete().eq("id", id); fail(error); }
+
+export async function fetchMentionNotifications() { const { data, error } = await supabase.rpc("get_mention_notifications", { limit_count: 50 }); fail(error); return data || []; }
+export async function markMentionNotificationsRead() { const { data, error } = await supabase.rpc("mark_mention_notifications_read"); fail(error); return Number(data || 0); }
+export async function fetchBlogAutosaveMinutes() { const { data, error } = await supabase.rpc("get_blog_autosave_minutes"); fail(error); cloud.blogAutosaveMinutes = [5,10,30].includes(Number(data)) ? Number(data) : 10; return cloud.blogAutosaveMinutes; }
+export async function setBlogAutosaveMinutes(minutes) { const value = Number(minutes); if (![5,10,30].includes(value)) throw new Error("自动保存间隔无效"); const { error } = await supabase.rpc("set_blog_autosave_minutes", { p_minutes: value }); fail(error); cloud.blogAutosaveMinutes = value; return value; }
 
 export async function fetchVault() {
   const [{ data: sections, error: se }, { data: templates, error: te }, { data: snapshots, error: ve }] = await Promise.all([

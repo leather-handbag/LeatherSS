@@ -37,7 +37,8 @@ async function createUser(kind) {
   const user = noError(created, `create ${kind}`).user;
   users.push(user.id);
   const client = createClient(url, key, options);
-  noError(await client.auth.signInWithPassword({ email, password }), `sign in ${kind}`);
+  const generated = noError(await service.auth.admin.generateLink({ type: "magiclink", email }), `generate test link ${kind}`);
+  noError(await client.auth.verifyOtp({ token_hash: generated.properties.hashed_token, type: "magiclink" }), `sign in ${kind}`);
   return { id: user.id, client };
 }
 
@@ -57,7 +58,8 @@ try {
 
   const self = noError(await one.client.rpc("get_my_profile").single(), "get own profile");
   assert.equal(self.role, "user");
-  noError(await one.client.rpc("update_my_profile", { p_display_name: "远端测试用户", p_handle: `test_${stamp.replaceAll("-", "").slice(-18)}`, p_bio: "自动清理的权限回归账号" }), "update own profile");
+  const oneHandle = `test_${stamp.replaceAll("-", "").slice(-18)}`;
+  noError(await one.client.rpc("update_my_profile", { p_display_name: "远端测试用户", p_handle: oneHandle, p_bio: "自动清理的权限回归账号" }), "update own profile");
   await expectError(one.client.from("profiles").select("*"), "sensitive profile table is not directly readable");
 
   const privatePost = noError(await one.client.from("posts").insert({ user_id: one.id, title: "私有回归文章", content: "private regression content", visibility: "private" }).select().single(), "create private post");
@@ -71,11 +73,29 @@ try {
 
   noError(await two.client.from("post_comments").insert({ post_id: publicPost.id, user_id: two.id, content: "公开文章评论回归" }), "comment on public post");
   await expectError(two.client.from("post_comments").insert({ post_id: privatePost.id, user_id: two.id, content: "不应写入的私有评论" }), "private post rejects comments");
-  noError(await two.client.from("station_comments").insert({ user_id: two.id, kind: "bug", content: "工作站 Bug 留言回归" }), "station comment");
+  const parentDiscussion = noError(await one.client.from("station_comments").insert({ user_id: one.id, kind: "academic", content: "讨论区父级内容" }).select().single(), "create discussion");
+  const replyDiscussion = noError(await two.client.from("station_comments").insert({ user_id: two.id, kind: "academic", content: `@${oneHandle} 讨论区回复通知`, reply_to: parentDiscussion.id }).select().single(), "reply and mention");
+  let mentions = noError(await one.client.rpc("get_mention_notifications", { limit_count: 30 }), "read own mention notifications");
+  assert(mentions.some(v => v.discussion_id === replyDiscussion.id && v.actor_id === two.id && !v.is_read));
+  noError(await one.client.rpc("mark_mention_notifications_read"), "mark mention notifications read");
+  mentions = noError(await one.client.rpc("get_mention_notifications", { limit_count: 30 }), "refresh mention notifications");
+  assert(mentions.some(v => v.discussion_id === replyDiscussion.id && v.is_read));
+  noError(await two.client.from("station_comments").delete().eq("id", replyDiscussion.id), "author deletes discussion");
+  const removedDiscussion = noError(await visitor.from("station_comments").select("id").eq("id", replyDiscussion.id), "verify discussion deletion");
+  assert.equal(removedDiscussion.length, 0); ok("discussion reply, mention and author deletion");
+
+  const initialAutosave = noError(await one.client.rpc("get_blog_autosave_minutes"), "read blog autosave setting");
+  assert([5, 10, 30].includes(Number(initialAutosave)));
+  noError(await one.client.rpc("set_blog_autosave_minutes", { p_minutes: 5 }), "set blog autosave interval");
+  assert.equal(Number(noError(await one.client.rpc("get_blog_autosave_minutes"), "verify blog autosave interval")), 5);
+  noError(await one.client.rpc("set_blog_autosave_minutes", { p_minutes: 10 }), "restore blog autosave interval"); ok("synced blog autosave setting");
 
   const firstCheckin = noError(await one.client.rpc("daily_checkin"), "first daily check-in");
   const secondCheckin = noError(await one.client.rpc("daily_checkin"), "second daily check-in");
-  assert.equal(firstCheckin.number, secondCheckin.number); ok("idempotent daily check-in");
+  assert.equal(firstCheckin.number, secondCheckin.number); assert.equal(firstCheckin.draw_count, 3); ok("three-draw idempotent daily check-in");
+
+  const moderationCount = await databaseQuery("select count(*)::integer as count, count(distinct category)::integer as categories from private.sensitive_terms;");
+  assert(moderationCount[0].count >= 400 && moderationCount[0].categories >= 8); ok("expanded strict moderation dictionary");
 
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=", "base64");
   const avatarPath = `${one.id}/${crypto.randomUUID()}.png`; avatarPaths.push(avatarPath);
