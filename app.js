@@ -1126,7 +1126,10 @@ loadAuthCaptcha();
 
 function avatarHtml(profile, cls = "") {
   const name = profile?.display_name || profile?.handle || "L";
-  return profile?.avatar_url ? `<span class="profile-avatar ${cls}"><img src="${esc(profile.avatar_url)}" alt=""></span>` : `<span class="profile-avatar ${cls}">${esc(name.slice(0, 1).toUpperCase())}</span>`;
+  const style = /^frame-[a-z0-9-]{2,40}$/.test(profile?.avatar_frame?.style_class || "") ? profile.avatar_frame.style_class : "";
+  const frame = style ? ` avatar-framed ${style}` : "";
+  const title = style ? ` title="头像框：${esc(profile.avatar_frame.name || "已解锁头像框")}"` : "";
+  return profile?.avatar_url ? `<span class="profile-avatar ${cls}${frame}"${title}><img src="${esc(profile.avatar_url)}" alt=""></span>` : `<span class="profile-avatar ${cls}${frame}"${title}>${esc(name.slice(0, 1).toUpperCase())}</span>`;
 }
 function roleBadge(role) { return role === "owner" ? '<span class="station-master-badge">站长</span>' : role === "admin" ? '<span class="admin-mini-badge">管理员</span>' : ""; }
 
@@ -1167,6 +1170,8 @@ function applyAuthState() {
   document.body.classList.toggle("guest", !active); document.body.classList.toggle("signed-in", active); document.body.classList.toggle("banned", !!profile?.banned_at);
   $("#topAccountName").textContent = signed ? (profile?.display_name || api.cloud.user.email || "账号") : "登录";
   $("#topAccountName").className = signed ? `name-${profile?.role === "user" ? (api.cloud.stats?.name_color || "blue") : "purple"}` : "";
+  const topFrame = /^frame-[a-z0-9-]{2,40}$/.test(profile?.avatar_frame?.style_class || "") ? profile.avatar_frame.style_class : "";
+  $("#topAccountAvatar").className = `account-avatar${topFrame ? ` avatar-framed ${topFrame}` : ""}`;
   $("#topAccountAvatar").innerHTML = profile?.avatar_url ? `<img src="${esc(profile.avatar_url)}" alt="">` : esc((profile?.display_name || api.cloud.user?.email || "?").slice(0, 1).toUpperCase());
   $("#sidebarStatusTitle").textContent = profile?.banned_at ? "账号已封禁" : active ? "云端已同步" : "访客只读";
   $("#sidebarStatusText").textContent = profile?.banned_at ? (profile.ban_reason || "写入权限已停用") : active ? `@${profile.handle}` : "登录后可保存与发布";
@@ -1180,7 +1185,7 @@ function renderAccount() {
   $("#authGuestPanel").classList.toggle("hidden", signed); $("#accountProfilePanel").classList.toggle("hidden", !signed);
   if (!signed || !profile) return;
   $("#profileDisplayName").value = profile.display_name || ""; $("#profileHandle").value = profile.handle || ""; $("#profileBio").value = profile.bio || "";
-  $("#profileAvatarPreview").outerHTML = avatarHtml(profile, "large").replace('class="profile-avatar large"', 'class="profile-avatar large" id="profileAvatarPreview"');
+  $("#profileAvatarPreview").outerHTML = avatarHtml(profile, "large").replace('class="profile-avatar large', 'id="profileAvatarPreview" class="profile-avatar large');
   const request = api.cloud.avatarRequest, avatarStatus = $("#avatarRequestStatus");
   avatarStatus.className = request ? `avatar-status-${request.status}` : "";
   avatarStatus.textContent = request?.status === "pending" ? "新头像正在等待管理员审核"
@@ -1216,7 +1221,9 @@ $("#profileForm").onsubmit = async e => {
   e.preventDefault(); const displayName = $("#profileDisplayName").value.trim(), handle = $("#profileHandle").value.trim().toLowerCase(), bio = $("#profileBio").value.trim();
   $("#profileError").textContent = ""; const bad = findSensitive({ 名字: displayName, ID: handle, 个人简介: bio }); if (bad && !api.cloud.configured) { $("#profileError").textContent = `${bad}包含不适宜内容`; return; }
   if (handle === "leather-handbag" && api.cloud.profile?.role !== "owner") { $("#profileError").textContent = "这个 ID 为站长保留"; return; }
-  try { const hasAvatar = !!avatarFile; await api.updateProfile({ displayName, handle, bio }); if (avatarFile) await api.uploadAvatar(avatarFile); avatarFile = null; $("#profileAvatarFile").value = ""; await api.refreshProfile(); applyAuthState(); await reloadCloudContent(); toast(hasAvatar ? "资料已保存，头像已提交审核" : "个人资料已保存"); }
+  try { const hasAvatar = !!avatarFile; const result = await api.updateProfile({ displayName, handle, bio });
+    if (result?.banned) { avatarFile = null; $("#profileAvatarFile").value = ""; applyAuthState(); $("#profileError").textContent = result.reason || "名字违规，账号已封禁"; toast("名字未通过服务端验证，账号已封禁", "error"); return; }
+    if (avatarFile) await api.uploadAvatar(avatarFile); avatarFile = null; $("#profileAvatarFile").value = ""; await api.refreshProfile(); applyAuthState(); await reloadCloudContent(); toast(hasAvatar ? "资料已保存，头像已提交审核" : "个人资料已保存"); }
   catch (error) { $("#profileError").textContent = error.message; await handlePossibleBan(); }
 };
 $("#passwordForm").onsubmit = async e => {
@@ -1343,7 +1350,7 @@ async function renderTrainingAdminMetrics() {
   try {
     const data = await api.fetchTrainingAdminMetrics(), queue = data.queue || {};
     $("#trainingAdminUpdated").textContent = data.generated_at ? nowText(Date.parse(data.generated_at)) : "刚刚";
-    $("#trainingAdminMetrics").innerHTML = `<div class="admin-training-summary"><span><b>${Number(queue.queued || 0)}</b>排队</span><span><b>${Number(queue.running || 0)}</b>运行中</span><span><b>${Number(queue.failed_24h || 0)}</b>24 小时失败</span></div><div class="admin-training-columns"><section><h3>平台状态</h3>${(data.sources || []).map(row => `<p><b>${esc(row.platform)}</b><span>${esc(row.status)} · ${Number(row.accounts)} 个账号</span><small>${row.last_success_at ? nowText(Date.parse(row.last_success_at)) : "尚未成功同步"}</small></p>`).join("") || '<div class="empty-list">暂无绑定账号</div>'}</section><section><h3>近期错误</h3>${(data.errors || []).map(row => `<p><b>${esc(row.platform || "unknown")}</b><span>${esc(row.error_code || "sync_error")} · ${Number(row.occurrences)} 次</span><small>${row.latest ? nowText(Date.parse(row.latest)) : ""}</small></p>`).join("") || '<div class="empty-list">最近 24 小时没有同步错误</div>'}</section><section><h3>私密访问审计</h3>${(data.recent_private_access || []).map(row => `<p><b>@${esc(row.actor_handle)}</b><span>查看 ${esc(row.target_user_id)}</span><small>${nowText(Date.parse(row.created_at))}</small></p>`).join("") || '<div class="empty-list">暂无私密热力图访问</div>'}</section></div>`;
+    $("#trainingAdminMetrics").innerHTML = `<div class="admin-training-summary"><span><b>${Number(queue.queued || 0)}</b>排队</span><span><b>${Number(queue.running || 0)}</b>运行中</span><span><b>${Number(queue.failed_24h || 0)}</b>24 小时失败</span><span><b>${Number(data.monthly_reports?.total || 0)}</b>已生成月报</span><span><b>${Number(data.ability?.stale || 0)}</b>能力评估过期</span><span><b>${Number(data.luogu?.disabled_accounts || 0)}</b>洛谷停用账号</span></div><div class="admin-training-columns"><section><h3>平台状态</h3>${(data.sources || []).map(row => `<p><b>${esc(row.platform)}</b><span>${esc(row.status)} · ${Number(row.accounts)} 个账号</span><small>${row.last_success_at ? nowText(Date.parse(row.last_success_at)) : "尚未成功同步"}</small></p>`).join("") || '<div class="empty-list">暂无绑定账号</div>'}</section><section><h3>近期错误</h3>${(data.errors || []).map(row => `<p><b>${esc(row.platform || "unknown")}</b><span>${esc(row.error_code || "sync_error")} · ${Number(row.occurrences)} 次</span><small>${row.latest ? nowText(Date.parse(row.latest)) : ""}</small></p>`).join("") || '<div class="empty-list">最近 24 小时没有同步错误</div>'}</section><section><h3>私密访问审计</h3>${(data.recent_private_access || []).map(row => `<p><b>@${esc(row.actor_handle)}</b><span>查看 ${esc(row.target_user_id)}</span><small>${nowText(Date.parse(row.created_at))}</small></p>`).join("") || '<div class="empty-list">暂无私密热力图访问</div>'}</section></div>`;
   } catch (error) { $("#trainingAdminMetrics").innerHTML = `<div class="empty-list">${esc(error.message)}</div>`; }
 }
 async function renderAdmin() {

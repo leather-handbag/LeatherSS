@@ -40,7 +40,7 @@ Deno.serve(async req => {
   try {
     requireWorkerSecret(req);
     const body = await req.json().catch(() => ({}));const platform = String(body.platform || "atcoder");
-    if (!['codeforces','atcoder'].includes(platform)) return jsonResponse({ error: "洛谷目录仅随用户提交增量更新" }, 400);
+    if (!['codeforces','atcoder'].includes(platform)) return jsonResponse({ error: "unsupported catalog platform" }, 400);
     const problems = platform === "codeforces" ? await codeforcesCatalog() : await atcoderCatalog();
     const admin = adminClient();let processed = 0;
     for (let i = 0; i < problems.length; i += 500) { await upsertProblems(admin, problems.slice(i, i + 500));processed += Math.min(500, problems.length - i); }

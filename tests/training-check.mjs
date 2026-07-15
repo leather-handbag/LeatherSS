@@ -9,6 +9,10 @@ const binding = read("supabase/functions/training-bind/index.ts");
 const adapters = read("supabase/functions/_shared/training.ts");
 const worker = read("supabase/functions/training-sync-worker/index.ts");
 const frontend = read("training-world.js");
+const phase2a = read("supabase/migrations/202607160010_phase2_security_frames_luogu.sql");
+const phase2b = read("supabase/migrations/202607160011_phase2_regions_ability_unlocks.sql");
+const phase2c = read("supabase/migrations/202607160012_phase2_monthly_learning_reports.sql");
+const disabledLuogu = read("supabase/functions/_disabled/training-luogu-provider.ts");
 
 assert.equal((schema.match(/^\('(?:plains|bronze|silver|gold|platinum|master|legend)'/gm) || []).length, 7, "seven map definitions required");
 for (const map of ["plains","bronze","silver","gold","platinum","master","legend"]) assert(schema.includes(`'${map}'`), `missing map ${map}`);
@@ -19,9 +23,22 @@ assert.match(logic, /coalesce\(s\.mastery_percent,0\)<100/, "all core regions mu
 assert.match(schema, /unique\(platform,external_user_id\)/); assert.match(schema, /unique\(platform,external_submission_id\)/);
 assert.match(logic, /insert into private\.training_access_audit/); assert.match(logic, /not coalesce\(v_public,true\) and v_staff/);
 assert.match(binding, /profileContainsChallenge/); assert.match(binding, /windowAttempts >= 3/); assert(!/password|cookie/i.test(binding.replace(/平台密码|Cookie/g, "")), "binding code must not accept platform credentials");
-for (const host of ["codeforces.com","kenkoooo.com","luogu.com.cn","atcoder.jp"]) assert(adapters.includes(host), `fixed adapter host missing: ${host}`);
+for (const host of ["codeforces.com","kenkoooo.com","atcoder.jp"]) assert(adapters.includes(host), `fixed adapter host missing: ${host}`);
+assert(!adapters.includes("luogu.com.cn"), "active adapter bundle must not contact Luogu");
+assert(!/\/record|X-Luogu-Type/i.test(adapters + binding + worker), "active Edge paths must not contain Luogu record scraping");
+assert.match(binding, /platform_unavailable/); assert.match(worker, /account\.platform === "luogu"/);
+assert.match(disabledLuogu, /awaiting_official_permission/); assert(!/fetch\s*\(/.test(disabledLuogu), "dormant provider must not make network calls");
 assert(!/new URL\([^)]*body|fetch\([^)]*body\./.test(adapters + binding), "user input must not control fetch origins");
 assert.match(worker, /claim_training_sync_job/); assert.match(worker, /verify_training_worker_token/); assert.match(worker, /EdgeRuntime/); assert.match(scheduler, /\*\/5 \* \* \* \*/); assert.match(scheduler, /training_worker_token/);
 assert.match(frontend, /fetchTrainingHeatmap/); assert.match(frontend, /assessmentText/); assert.match(frontend, /data-bind-platform/);
+assert(!/luogu/.test(frontend), "Luogu must be absent from active training UI");
+for (const oldName of ["工匠营地","潮汐灯塔","机关矿道","流沙工坊","浮空铸造厂","时空船坞","万象裂谷"]) assert(!phase2b.includes(`'${oldName}'`), `fantasy-only region name remains: ${oldName}`);
+for (const threshold of ["v_average>=1100","v_average>=1400","v_average>=1700","v_average>=2000","v_average>=2400","v_average>=2800"]) assert(phase2b.includes(threshold), `direct unlock threshold missing: ${threshold}`);
+assert.match(phase2b, /least\(20,greatest\(5,ceil\(v_n\*\.25\)/); assert.match(phase2b, /'reason','ability_average'/);
+assert.match(phase2a, /normalize\(coalesce\(split_part\(new\.email,'@',1\),''\),NFKC\)/); assert.match(phase2a, /'banned',true/);
+for (const frame of ["expedition_bronze","laurel_streak","ink_author","community_crown","balanced_emerald","map_conqueror","chromatic_chosen"]) assert(phase2a.includes(`('${frame}'`), `avatar frame missing: ${frame}`);
+assert.match(phase2c, /unique\(user_id,report_month\)/); assert.match(phase2c, /Asia\/Shanghai/); assert.match(phase2c, /extract\(day from \(now\(\) at time zone 'Asia\/Shanghai'\)\).*<>2/);
+assert.match(phase2c, /monthly_learning_reports_own_read/); assert.match(phase2c, /20 16 \* \* \*/);
+assert.match(phase2c, /monthly_skill_snapshots_client_deny/); assert.match(phase2c, /'mastery_delta'/);
 
 console.log("Algorithm Expedition checks passed: maps, scoring, privacy, adapters, queue and UI contracts.");

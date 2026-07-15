@@ -15,7 +15,9 @@ export async function refreshProfile() {
     supabase.from("public_profile_stats").select("*").eq("id", cloud.user.id).maybeSingle(),
     supabase.from("avatar_requests").select("id,status,review_note,created_at,reviewed_at").eq("user_id", cloud.user.id).order("created_at", { ascending: false }).limit(1).maybeSingle()
   ]);
-  fail(error); fail(statsError); fail(avatarError); cloud.profile = profile || null; cloud.stats = stats || null; cloud.avatarRequest = avatarRequest || null; return cloud.profile;
+  fail(error); fail(statsError); fail(avatarError); cloud.stats = stats || null;
+  cloud.profile = profile ? { ...profile, avatar_frame: stats?.avatar_frame || null } : null;
+  cloud.avatarRequest = avatarRequest || null; return cloud.profile;
 }
 
 export async function initCloud(onChange) {
@@ -49,7 +51,12 @@ export async function updatePassword(password) { const { error } = await supabas
 export async function signOut() { const { error } = await supabase.auth.signOut(); fail(error); }
 
 export async function updateProfile(value) {
-  const { error } = await supabase.rpc("update_my_profile", { p_display_name: value.displayName, p_handle: value.handle.toLowerCase(), p_bio: value.bio }); fail(error); await refreshProfile();
+  const { data, error } = await supabase.rpc("update_my_profile", { p_display_name: value.displayName, p_handle: value.handle.toLowerCase(), p_bio: value.bio });
+  fail(error); await refreshProfile();
+  const result = data || { ok: true, banned: false, reason: null };
+  if (result.banned) return result;
+  if (result.ok === false) throw new Error(result.reason || "资料未通过服务端验证");
+  return result;
 }
 export async function uploadAvatar(file) {
   if (!file || file.size > 2 * 1024 * 1024) throw new Error("头像不能超过 2 MB");
@@ -154,6 +161,10 @@ export async function fetchTrainingAdminMetrics() { const { data, error } = awai
 export async function updateTrainingPrivacy(value) { const { data, error } = await supabase.rpc("update_training_privacy", { accounts_visible: !!value.accounts, heatmap_visible: !!value.heatmap, map_visible: !!value.map, recent_visible: !!value.recent }); fail(error); return Array.isArray(data) ? data[0] : data; }
 export async function trainingBindingAction(body) { const { data, error } = await supabase.functions.invoke("training-bind", { body }); fail(error); if (data?.error) throw new Error(data.error); return data; }
 export async function requestTrainingSync(platform = null) { const { data, error } = await supabase.functions.invoke("training-sync-request", { body: { platform } }); fail(error); if (data?.error) throw new Error(data.error); return data; }
+export async function fetchAvatarFrames() { const { data, error } = await supabase.rpc("get_my_avatar_frames"); fail(error); return data || []; }
+export async function equipAvatarFrame(code = null) { const { data, error } = await supabase.rpc("equip_avatar_frame", { frame_code: code || null }); fail(error); await refreshProfile(); return data; }
+export async function fetchLearningReports(limit = 24) { const { data, error } = await supabase.rpc("get_my_learning_reports", { limit_count: limit }); fail(error); return data || []; }
+export async function fetchLearningReport(month) { const { data, error } = await supabase.rpc("get_my_learning_report", { report_month: month }); fail(error); return data || null; }
 
 export async function fetchVault() {
   const [{ data: sections, error: se }, { data: templates, error: te }, { data: snapshots, error: ve }] = await Promise.all([

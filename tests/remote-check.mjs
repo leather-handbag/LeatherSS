@@ -62,12 +62,18 @@ try {
 
   const self = noError(await one.client.rpc("get_my_profile").single(), "get own profile");
   assert.equal(self.role, "user");
+  assert.notEqual(self.display_name, "Codex user-one");
+  assert.match(self.display_name, /^codex-/i); ok("email-prefix profile initialization ignores OAuth full_name");
   const oneHandle = `test_${crypto.randomUUID().replaceAll("-", "").replace(/\d/g, "a").slice(0, 18)}`;
-  noError(await one.client.rpc("update_my_profile", { p_display_name: "远端测试用户", p_handle: oneHandle, p_bio: "自动清理的权限回归账号" }), "update own profile");
+  const profileUpdate = noError(await one.client.rpc("update_my_profile", { p_display_name: "远端测试用户", p_handle: oneHandle, p_bio: "自动清理的权限回归账号" }), "update own profile");
+  assert.equal(profileUpdate.ok, true); assert.equal(profileUpdate.banned, false);
   await expectError(one.client.from("profiles").select("*"), "sensitive profile table is not directly readable");
 
   const trainingDashboard = noError(await one.client.rpc("get_my_training_dashboard"), "read own training dashboard");
   assert.equal(trainingDashboard.maps.length, 7); assert(trainingDashboard.maps[0].unlocked); assert.equal(trainingDashboard.accounts.length, 0);
+  assert(trainingDashboard.ability_estimate && typeof trainingDashboard.ability_estimate === "object");
+  const luoguSync = noError(await one.client.rpc("enqueue_training_sync", { platform_name: "luogu" }), "Luogu sync request is safely rejected");
+  assert.equal(luoguSync.error, "platform_unavailable");
   const publicTraining = noError(await visitor.rpc("get_training_profile", { target_user: one.id }), "read public training profile");
   assert.equal(publicTraining.visibility.map, true); assert.equal(publicTraining.maps.length, 7);
   noError(await one.client.rpc("update_training_privacy", { accounts_visible: false, heatmap_visible: false, map_visible: false, recent_visible: false }), "make training profile private");
@@ -81,6 +87,23 @@ try {
   noError(await one.client.rpc("update_training_privacy", { accounts_visible: true, heatmap_visible: true, map_visible: true, recent_visible: true }), "restore public training profile");
   ok("training map defaults, privacy, staff audit and raw-event isolation");
   stage("training-privacy-passed");
+
+  const frameCatalog = noError(await one.client.rpc("get_my_avatar_frames"), "read own avatar frame cabinet");
+  assert(frameCatalog.length >= 7 && frameCatalog.every(v => !v.unlocked));
+  await expectError(one.client.rpc("equip_avatar_frame", { frame_code: "map_conqueror" }), "locked avatar frame cannot be equipped");
+  await databaseQuery(`insert into public.user_achievements(user_id,code,detail) values('${one.id}'::uuid,'streak_30','remote test') on conflict do nothing;`);
+  const unlockedFrames = noError(await one.client.rpc("get_my_avatar_frames"), "achievement unlocks avatar frame");
+  assert(unlockedFrames.some(v => v.code === "laurel_streak" && v.unlocked));
+  noError(await one.client.rpc("equip_avatar_frame", { frame_code: "laurel_streak" }), "equip unlocked avatar frame");
+  const framedProfile = noError(await visitor.from("public_profile_stats").select("avatar_frame").eq("id", one.id).single(), "public frame DTO");
+  assert.equal(framedProfile.avatar_frame.code, "laurel_streak");
+  noError(await one.client.rpc("equip_avatar_frame", { frame_code: null }), "unequip avatar frame"); ok("avatar frame entitlement and public DTO");
+
+  const reportList = noError(await one.client.rpc("get_my_learning_reports", { limit_count: 12 }), "read own monthly reports");
+  assert(Array.isArray(reportList));
+  const hiddenReports = noError(await two.client.from("monthly_learning_reports").select("id").eq("user_id", one.id), "other user receives no private monthly reports");
+  assert.equal(hiddenReports.length, 0); ok("other user cannot read private monthly reports");
+  await expectError(one.client.rpc("generate_due_learning_reports"), "ordinary user cannot generate monthly reports");
 
   const privatePost = noError(await one.client.from("posts").insert({ user_id: one.id, title: "私有回归文章", content: "private regression content", visibility: "private" }).select().single(), "create private post");
   const publicPost = noError(await one.client.from("posts").insert({ user_id: one.id, title: "公开回归文章", content: "public regression content", visibility: "public" }).select().single(), "create public post");
@@ -171,11 +194,16 @@ try {
   await expectError(admin.client.rpc("owner_list_banned_users", { limit_count: 100 }), "admin cannot read owner ban list");
   await expectError(admin.client.rpc("admin_ban_user", { target_id: owner.id, reason: "越权测试" }), "admin cannot ban owner");
   noError(await admin.client.rpc("admin_ban_user", { target_id: two.id, reason: "管理员权限回归测试" }), "admin bans ordinary user");
-  await expectError(two.client.rpc("update_my_profile", { p_display_name: "blocked", p_handle: `blocked_${stamp.slice(-8)}`, p_bio: "" }), "banned user cannot write");
+  const bannedWrite = noError(await two.client.rpc("update_my_profile", { p_display_name: "blocked", p_handle: `blocked_${stamp.slice(-8)}`, p_bio: "" }), "banned user receives structured profile response");
+  assert.equal(bannedWrite.banned, true);
   await expectError(admin.client.rpc("owner_unban_user", { target_id: two.id }), "admin cannot unban");
   let banned = noError(await owner.client.rpc("owner_list_banned_users", { limit_count: 100 }), "owner lists bans");
   assert(banned.some(v => v.id === two.id && v.ban_reason === "管理员权限回归测试"));
   noError(await owner.client.rpc("owner_unban_user", { target_id: two.id }), "owner unbans user"); ok("owner-only ban list and unban");
+
+  const unsafeName = noError(await two.client.rpc("update_my_profile", { p_display_name: "nmsl", p_handle: `safe_${stamp.slice(-8)}`, p_bio: "should not persist" }), "unsafe name returns atomic ban response");
+  assert.equal(unsafeName.ok, false); assert.equal(unsafeName.banned, true); assert.equal(unsafeName.profile.display_name, "已封禁用户"); assert.equal(unsafeName.profile.bio, "");
+  noError(await owner.client.rpc("owner_unban_user", { target_id: two.id }), "owner clears unsafe-name ban"); ok("unsafe display name bans atomically without partial profile writes");
 
   noError(await two.client.from("posts").insert({ user_id: two.id, title: "敏感词审核回归", content: "nmsl", visibility: "public" }), "submit moderated post");
   const moderated = noError(await two.client.rpc("get_my_profile").single(), "read moderation state");

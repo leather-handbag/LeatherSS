@@ -1,4 +1,7 @@
-export type Platform = "codeforces" | "atcoder" | "luogu";
+// Only providers with an approved, public submission source belong in this
+// active union.  The dormant Luogu reference implementation lives under
+// functions/_disabled and is deliberately not imported by any Edge Function.
+export type Platform = "codeforces" | "atcoder";
 
 export type ExternalProfile = {
   platform: Platform;
@@ -47,7 +50,6 @@ export type SyncPage = {
 const agents = {
   codeforces: "Leather-Algorithm-Expedition/1.0 (+public submission metadata)",
   atcoder: "Leather-Algorithm-Expedition/1.0",
-  luogu: "Mozilla/5.0 Leather-Algorithm-Expedition/1.0",
 };
 
 function clean(value: unknown, max = 300) {
@@ -96,7 +98,6 @@ export function normalizeHandle(platform: Platform, value: unknown) {
   const patterns: Record<Platform, RegExp> = {
     codeforces: /^[A-Za-z0-9_.-]{3,24}$/,
     atcoder: /^[A-Za-z0-9_]{1,40}$/,
-    luogu: /^[A-Za-z0-9_\-]{1,30}$/,
   };
   if (!patterns[platform].test(raw)) throw Object.assign(new Error("用户名格式不符合该平台规则"), { status: 400, code: "invalid_handle" });
   return platform === "codeforces" ? raw.toLowerCase() : raw;
@@ -111,10 +112,6 @@ export function mapDifficulty(platform: Platform, raw: number | null) {
   if (raw == null || !Number.isFinite(raw)) return { normalized: null, mapCode: null };
   let value = Math.round(raw);
   if (platform === "atcoder") value = atcoderDisplayDifficulty(value) ?? value;
-  if (platform === "luogu") {
-    const mapping: Record<number, number> = { 0: 800, 1: 900, 2: 1200, 3: 1500, 4: 1800, 5: 2200, 6: 2600, 7: 3000 };
-    value = mapping[Math.round(raw)] ?? value;
-  }
   const mapCode = value < 1100 ? "plains" : value < 1400 ? "bronze" : value < 1700 ? "silver" : value < 2000 ? "gold" : value < 2400 ? "platinum" : value < 2800 ? "master" : "legend";
   return { normalized: value, mapCode };
 }
@@ -136,18 +133,7 @@ export async function inspectProfile(platform: Platform, requestedHandle: string
     const avatar = text.match(/<img[^>]+class="avatar"[^>]+src="([^"]+)"/i)?.[1] || "";
     return { platform, handle: normalized, normalizedHandle: normalized, externalUserId: normalized, avatarUrl: clean(avatar.startsWith("//") ? `https:${avatar}` : avatar, 1000), profileUrl: url, verificationText: htmlText(affiliation) };
   }
-  const search = await fetchJson<{ users?: Array<{ uid: number; name: string; avatar?: string }> }>(`https://www.luogu.com.cn/api/user/search?keyword=${encodeURIComponent(normalized)}`, platform);
-  const user = search.users?.find(item => item.name.toLowerCase() === normalized.toLowerCase());
-  if (!user) throw Object.assign(new Error("没有找到这个洛谷用户"), { status: 404, code: "not_found" });
-  const url = `https://www.luogu.com.cn/user/${user.uid}`;
-  const { text } = await fetchText(url, platform, 15000, { Referer: "https://www.luogu.com.cn/" });
-  return { platform, handle: clean(user.name, 40), normalizedHandle: user.name.toLowerCase(), externalUserId: String(user.uid), avatarUrl: clean(user.avatar, 1000), profileUrl: url, verificationText: htmlText(decodeLuoguPayload(text)) };
-}
-
-function decodeLuoguPayload(text: string) {
-  const match = text.match(/decodeURIComponent\(["']([\s\S]*?)["']\)/);
-  if (!match) return text;
-  try { return `${text} ${decodeURIComponent(match[1])}`; } catch { return text; }
+  throw Object.assign(new Error("不支持的平台"), { status: 400, code: "unsupported_platform" });
 }
 
 export async function hmacCode(value: string) {
@@ -172,8 +158,7 @@ export async function profileContainsChallenge(profile: ExternalProfile, expecte
 
 export function fallbackChallenge(platform: Platform) {
   if (platform === "codeforces") return { problemId: "4A", title: "Watermelon", url: "https://codeforces.com/problemset/problem/4/A", verdict: "COMPILATION_ERROR", windowMinutes: 20 };
-  if (platform === "atcoder") return { problemId: "abc086_a", title: "Product", url: "https://atcoder.jp/contests/abc086/tasks/abc086_a", verdict: "CE", windowMinutes: 120 };
-  return { problemId: "P1000", title: "超级玛丽游戏", url: "https://www.luogu.com.cn/problem/P1000", verdict: "COMPILE_ERROR", windowMinutes: 20 };
+  return { problemId: "abc086_a", title: "Product", url: "https://atcoder.jp/contests/abc086/tasks/abc086_a", verdict: "CE", windowMinutes: 120 };
 }
 
 export async function verifySubmissionChallenge(profile: ExternalProfile, payload: Record<string, unknown>, createdAt: string) {
@@ -186,8 +171,7 @@ type AccountInput = { platform: Platform; handle: string; external_user_id: stri
 
 export async function syncPage(account: AccountInput, cursor: Record<string, unknown> = {}): Promise<SyncPage> {
   if (account.platform === "codeforces") return syncCodeforces(account, cursor);
-  if (account.platform === "atcoder") return syncAtcoder(account, cursor);
-  return syncLuogu(account, cursor);
+  return syncAtcoder(account, cursor);
 }
 
 async function syncCodeforces(account: AccountInput, cursor: Record<string, unknown>): Promise<SyncPage> {
@@ -231,50 +215,4 @@ async function syncAtcoder(account: AccountInput, cursor: Record<string, unknown
   }
   const more = rows.length >= 500;
   return { problems: [...problems.values()], submissions, cursor: { fromSecond: more ? maxSecond + 1 : maxSecond, mode: "incremental" }, more, dataThrough: submissions.length ? submissions[submissions.length - 1].submittedAt : null };
-}
-
-function parseLuoguContent(text: string): Record<string, unknown> {
-  try { return JSON.parse(text) as Record<string, unknown>; } catch { /* continue */ }
-  const expanded = decodeLuoguPayload(text);
-  const candidates = expanded.match(/\{[\s\S]*\}/g) || [];
-  for (const candidate of candidates.sort((a, b) => b.length - a.length).slice(0, 5)) {
-    try { const parsed = JSON.parse(candidate); if (parsed && typeof parsed === "object") return parsed; } catch { /* continue */ }
-  }
-  throw Object.assign(new Error("洛谷公开记录页面结构已经变化"), { code: "parser_changed", retryable: true });
-}
-
-function nested(value: unknown, ...keys: string[]): unknown {
-  let current = value;
-  for (const key of keys) current = current && typeof current === "object" ? (current as Record<string, unknown>)[key] : undefined;
-  return current;
-}
-
-async function syncLuogu(account: AccountInput, cursor: Record<string, unknown>): Promise<SyncPage> {
-  const page = Math.max(1, Number(cursor.page || 1));
-  const url = `https://www.luogu.com.cn/record/list?user=${encodeURIComponent(account.external_user_id)}&page=${page}&_contentOnly=1`;
-  const { text } = await fetchText(url, "luogu", 20000, { "X-Luogu-Type": "content-only", Referer: "https://www.luogu.com.cn/record/list" });
-  const payload = parseLuoguContent(text);
-  const recordBox = nested(payload, "currentData", "records") || nested(payload, "records") || nested(payload, "data", "records") || {};
-  const rows = (nested(recordBox, "result") || nested(recordBox, "records") || []) as Array<Record<string, unknown>>;
-  if (!Array.isArray(rows)) throw Object.assign(new Error("洛谷提交记录格式无法识别"), { code: "parser_changed", retryable: true });
-  const problems = new Map<string, NormalizedProblem>();
-  const submissions: NormalizedSubmission[] = [];
-  for (const row of rows) {
-    const problem = (row.problem || {}) as Record<string, unknown>;
-    const pid = clean(problem.pid || row.pid, 80);
-    if (!pid) continue;
-    const raw = Number.isFinite(Number(problem.difficulty)) ? Number(problem.difficulty) : null;
-    const difficulty = mapDifficulty("luogu", raw);
-    const tagsRaw = (problem.tags || problem.tag || []) as unknown;
-    const tags = Array.isArray(tagsRaw) ? tagsRaw.map(item => typeof item === "object" ? clean((item as Record<string, unknown>).name, 80) : clean(item, 80)).filter(Boolean) : [];
-    problems.set(pid, { platform: "luogu", externalProblemId: pid, contestId: clean(problem.contestId, 80), index: pid, title: clean(problem.title || problem.name, 240) || pid, url: `https://www.luogu.com.cn/problem/${encodeURIComponent(pid)}`, rawDifficulty: raw, normalizedDifficulty: difficulty.normalized, mapCode: difficulty.mapCode, rawTags: tags });
-    const statusValue = row.status;
-    const verdict = typeof statusValue === "number" ? (Number(statusValue) === 12 ? "ACCEPTED" : Number(statusValue) === 7 ? "COMPILE_ERROR" : `STATUS_${statusValue}`) : clean(statusValue || row.statusText || "UNKNOWN", 80);
-    const epoch = Number(row.submitTime || row.time || row.createTime || 0);
-    submissions.push({ externalSubmissionId: clean(row.id || row.rid, 80), problemExternalId: pid, verdict, accepted: verdict === "ACCEPTED" || verdict === "AC", language: clean(row.language || nested(row, "language", "name"), 80), submittedAt: new Date(epoch > 1e12 ? epoch : epoch * 1000).toISOString(), timeMs: Number.isFinite(Number(row.time)) ? Number(row.time) : null, memoryKb: Number.isFinite(Number(row.memory)) ? Number(row.memory) : null });
-  }
-  const perPage = Number(nested(recordBox, "perPage") || 20);
-  const count = Number(nested(recordBox, "count") || 0);
-  const more = count ? page * perPage < count : rows.length >= perPage;
-  return { problems: [...problems.values()], submissions, cursor: { page: more ? page + 1 : 1, mode: more ? "initial" : "incremental" }, more, dataThrough: submissions[0]?.submittedAt || null };
 }

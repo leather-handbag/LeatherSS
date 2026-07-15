@@ -31,6 +31,10 @@ async function processOne(workerId: string) {
     await admin.rpc("finish_training_sync_job", { target_job: job.id, outcome: "failed", failure_code: "account_missing", failure_message: accountError?.message || "external account was removed" });
     return { job: job.id, outcome: "failed", code: "account_missing" };
   }
+  if (account.platform === "luogu" || account.status === "disabled") {
+    await admin.rpc("finish_training_sync_job", { target_job: job.id, outcome: "failed", failure_code: "platform_unavailable", failure_message: "provider disabled pending official permission" });
+    return { job: job.id, platform: account.platform, outcome: "failed", code: "platform_unavailable" };
+  }
   try {
     const { data: waitMs, error: leaseError } = await admin.rpc("acquire_training_platform_lease", { platform_name: account.platform });if (leaseError) throw leaseError;
     if (Number(waitMs) > 0) await pause(Math.min(Number(waitMs), 5000));
