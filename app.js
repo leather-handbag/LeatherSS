@@ -1075,10 +1075,10 @@ const hasWriteAccess = () => !!(api.cloud.user && api.cloud.profile && !api.clou
 const isStaff = () => ["admin", "owner"].includes(api.cloud.profile?.role);
 const chinaDateText = value => new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(value ? new Date(`${value}T00:00:00+08:00`) : new Date());
 
-function setAuthCaptchaStatus(message, state = "") {
+function setAuthCaptchaStatus(message, state = "", canRetry = false) {
   const status = $("#authCaptchaStatus");
-  if (!status) return;
-  status.textContent = message; status.className = state;
+  if (status) { status.textContent = message; status.className = state; }
+  $("#authCaptchaRetryBtn")?.classList.toggle("hidden", !canRetry);
 }
 function renderAuthCaptcha() {
   if (!api.turnstileConfigured || authCaptchaWidget !== null || !window.turnstile) return;
@@ -1124,6 +1124,10 @@ function resetAuthCaptcha() {
   authCaptchaToken = "";
   if (window.turnstile && authCaptchaWidget !== null) window.turnstile.reset(authCaptchaWidget);
   setAuthCaptchaStatus("请完成人机验证", "");
+}
+function consumeAuthCaptcha(message) {
+  authCaptchaToken = "";
+  setAuthCaptchaStatus(message || "本次验证未完成，请重新验证后再试", "error", true);
 }
 loadAuthCaptcha();
 
@@ -1249,8 +1253,8 @@ $("#emailAuthForm").onsubmit = async e => {
   if (password.length < 8) { $("#authError").textContent = "密码至少 8 位"; return; }
   if (authMode === "signup" && password !== $("#authPasswordConfirm").value) { $("#authError").textContent = "两次密码不一致"; return; }
   let usedCaptcha = false; $("#emailAuthSubmit").disabled = true;
-  try { const captchaToken = requireAuthCaptcha(); usedCaptcha = !!captchaToken; if (authMode === "signup") { const data = await api.emailSignup(email, password, captchaToken); if (data.session) { showSignupVerification(""); toast("注册并登录成功"); } else { showSignupVerification(email); toast("验证码已发送，请查看邮箱"); } } else await api.emailLogin(email, password, captchaToken); }
-  catch (error) { $("#authError").textContent = error.message; if (usedCaptcha) resetAuthCaptcha(); }
+  try { const captchaToken = requireAuthCaptcha(); usedCaptcha = !!captchaToken; if (usedCaptcha) setAuthCaptchaStatus("安全验证已通过，正在提交……", "ready"); if (authMode === "signup") { const data = await api.emailSignup(email, password, captchaToken); if (data.session) { showSignupVerification(""); toast("注册并登录成功"); } else { showSignupVerification(email); toast("验证码已发送，请查看邮箱"); } } else await api.emailLogin(email, password, captchaToken); }
+  catch (error) { $("#authError").textContent = error.message; if (usedCaptcha) consumeAuthCaptcha(authMode === "signup" ? "创建账号没有完成，请点击重新验证后再试" : "登录没有完成，请点击重新验证后再试"); }
   finally { $("#emailAuthSubmit").disabled = false; }
 };
 $("#signupVerificationForm").onsubmit = async e => {
@@ -1268,6 +1272,7 @@ $("#resendSignupCodeBtn").onclick = async () => {
   finally { setTimeout(() => { button.disabled = false; }, 60000); }
 };
 $("#backToSignupBtn").onclick = () => { showSignupVerification(""); authMode = "signup"; $$('[data-auth-tab]').forEach(v => v.classList.toggle("active", v.dataset.authTab === "signup")); $("#authConfirmLabel").classList.remove("hidden"); $("#authPasswordConfirm").required = true; $("#emailAuthSubmit").textContent = "创建账号"; resetAuthCaptcha(); };
+$("#authCaptchaRetryBtn").onclick = resetAuthCaptcha;
 $("#githubAuthBtn").onclick = async () => { if (!api.cloud.configured) { toast("请先配置 Supabase", "error"); return; } try { await api.githubLogin(); } catch (error) { toast(error.message, "error"); } };
 $("#resetPasswordBtn").onclick = async () => { const email = $("#authEmail").value.trim(); if (!email) { $("#authError").textContent = "请先填写邮箱"; return; } let usedCaptcha = false; try { const captchaToken = requireAuthCaptcha(); usedCaptcha = !!captchaToken; await api.sendPasswordReset(email, captchaToken); toast("密码重置邮件已发送"); } catch (error) { $("#authError").textContent = error.message; } finally { if (usedCaptcha) resetAuthCaptcha(); } };
 $("#signOutBtn").onclick = async () => { if (!confirmBlogDiscard() || !confirmDiscard()) return; try { await api.signOut(); location.hash = "home"; } catch (error) { toast(error.message, "error"); } };
